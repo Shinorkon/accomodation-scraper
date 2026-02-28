@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+cloudscraper
+playwright
+openai
+geopy
+flask
+python-dotenv

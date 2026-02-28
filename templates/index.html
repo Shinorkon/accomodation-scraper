@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AccomFinder — KL Rentals</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    @keyframes shimmer {
+      0%   { background-position: -800px 0; }
+      100% { background-position: 800px 0; }
+    }
+    .skeleton {
+      background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 0.5rem;
+    }
+
+    /* Map container — supports fullscreen toggle */
+    #map-wrap { position: relative; }
+    #map { height: 340px; width: 100%; transition: height 0.25s ease; }
+    #map.fullscreen { height: 85vh; }
+
+    #fullscreen-btn {
+      position: absolute; top: 10px; right: 10px; z-index: 1000;
+      background: white; border: 2px solid rgba(0,0,0,0.2);
+      border-radius: 6px; padding: 4px 7px; cursor: pointer;
+      font-size: 16px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    #fullscreen-btn:hover { background: #f8f8f8; }
+
+    .card-img { width:100%; height:200px; object-fit:cover; background:#e2e8f0; display:block; }
+    .listing-card { transition: transform 0.15s ease, box-shadow 0.15s ease; cursor: pointer; }
+    .listing-card:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,0,0,0.12); }
+    .img-wrap { position: relative; overflow: hidden; }
+    .source-badge {
+      position: absolute; top: 10px; left: 10px;
+      font-size: 11px; font-weight: 700; color: #fff;
+      padding: 2px 9px; border-radius: 999px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+      pointer-events: none;
+    }
+
+    /* Preview modal */
+    #preview-modal {
+      display: none;
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(4px);
+      align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    #preview-modal.open { display: flex; }
+    #preview-inner {
+      background: #fff;
+      border-radius: 20px;
+      max-width: 620px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.30);
+      animation: slideUp 0.22s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    #preview-img {
+      width: 100%; height: 280px; object-fit: cover;
+      border-radius: 20px 20px 0 0; display: block;
+      background: #e2e8f0;
+    }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .leaflet-popup-content-wrapper { border-radius: 12px !important; padding: 0 !important; overflow: hidden; }
+    .leaflet-popup-content { margin: 0 !important; }
+    .map-popup { padding: 10px 14px; min-width: 170px; font-family: system-ui, sans-serif; }
+    .map-popup strong { display: block; font-size: 13px; color: #0f172a; margin-bottom: 3px; line-height: 1.3; }
+    .map-popup .mprice { color: #2563eb; font-weight: 700; font-size: 13px; }
+    .map-popup .mloc { color: #64748b; font-size: 11px; margin-top: 1px; }
+    .map-popup a { display:block; margin-top:7px; font-size:11px; color:#2563eb; text-decoration:none; font-weight:600; }
+    .map-popup a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen" style="font-family: system-ui, -apple-system, sans-serif;">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-5 h-14 flex items-center gap-3">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:#2563eb;">
+          <svg class="w-4 h-4" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+        </div>
+        <span class="font-bold text-lg text-slate-900">AccomFinder</span>
+        <span class="hidden sm:inline text-xs text-slate-400 font-medium">KL Rentals</span>
+      </div>
+      <div class="ml-auto hidden sm:flex items-center gap-1.5 text-xs text-slate-400">
+        <span class="w-2 h-2 rounded-full inline-block" style="background:#16a34a;"></span>PropertyGuru
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#2563eb;"></span>DotProperty
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#dc2626;"></span>Rentola
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#ea580c;"></span>iProperty
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#0891b2;"></span>EdgeProp
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#d97706;"></span>Mudah
+        <span class="w-2 h-2 rounded-full inline-block ml-1" style="background:#7c3aed;"></span>StarProperty
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Hero / Search ───────────────────────────────────────────────────── -->
+  <div style="background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 60%, #2563eb 100%);">
+    <div class="max-w-7xl mx-auto px-5 py-10">
+      <h1 class="text-3xl font-extrabold text-white mb-1 tracking-tight">Find apartments near you</h1>
+      <p class="text-blue-200 text-sm mb-7">Paste a Google Maps URL · choose bedrooms · search 7 sites at once</p>
+
+      <form id="search-form" class="space-y-4">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1">
+            <label class="block text-xs text-blue-300 font-semibold mb-1.5 uppercase tracking-widest">📍 Google Maps URL</label>
+            <input id="maps-url" type="url"
+              placeholder="https://maps.app.goo.gl/... or paste a full Maps link"
+              class="w-full rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 shadow focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          </div>
+          <div class="w-full sm:w-48">
+            <label class="block text-xs text-blue-300 font-semibold mb-1.5 uppercase tracking-widest">🛏 Bedrooms</label>
+            <select id="bedrooms"
+              class="w-full rounded-xl px-4 py-3 text-slate-800 text-sm shadow focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="1">1 Bedroom</option>
+              <option value="2">2 Bedrooms</option>
+              <option value="3">3 Bedrooms</option>
+              <option value="4">4 Bedrooms</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-blue-300 font-semibold mb-2 uppercase tracking-widest">Sites to search</label>
+          <div class="flex flex-wrap gap-2">
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="PropertyGuru" checked> PropertyGuru
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="DotProperty" checked> DotProperty
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="Rentola" checked> Rentola
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="iProperty" checked> iProperty
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="EdgeProp" checked> EdgeProp
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="Mudah" checked> Mudah
+            </label>
+            <label class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2 cursor-pointer text-white text-sm font-medium transition-colors border border-white/20">
+              <input type="checkbox" class="site-toggle" value="StarProperty" checked> StarProperty
+            </label>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4 pt-1">
+          <button type="submit" id="search-btn"
+            class="bg-white font-bold px-8 py-3 rounded-xl text-sm shadow hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style="color:#1d4ed8;">
+            Search
+          </button>
+          <span id="status-text" class="text-sm text-blue-200 hidden"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Content ─────────────────────────────────────────────────────────── -->
+  <div class="max-w-7xl mx-auto px-5 py-6 space-y-5">
+
+    <!-- Map card -->
+    <div id="map-section" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 overflow-visible">
+      <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+        </svg>
+        <span id="map-title" class="text-sm font-semibold text-slate-700">Map</span>
+        <span id="map-subtitle" class="text-xs text-slate-400"></span>
+        <div class="ml-auto flex items-center gap-3 text-xs text-slate-500">
+          <span class="flex items-center gap-1"><span style="width:10px;height:10px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#1d4ed8;display:inline-block;"></span> Your location</span>
+          <span class="flex items-center gap-1"><span style="width:10px;height:10px;border-radius:50%;background:#64748b;display:inline-block;"></span> Listing</span>
+        </div>
+      </div>
+      <div id="map-wrap" class="overflow-hidden rounded-b-2xl">
+        <button id="fullscreen-btn" title="Toggle fullscreen map">⛶</button>
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div id="toolbar" class="hidden flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <span id="result-count" class="text-sm font-semibold text-slate-700"></span>
+        <span class="text-xs text-slate-400">· Click any card to preview</span>
+        <div id="error-badges" class="flex gap-2 flex-wrap"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-500 font-medium">Sort by</span>
+        <select id="sort-select"
+          class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm">
+          <option value="distance">Distance</option>
+          <option value="price_asc">Price ↑</option>
+          <option value="price_desc">Price ↓</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Skeleton grid -->
+    <div id="skeleton-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+    <!-- Results grid -->
+    <div id="results-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="hidden text-center py-20">
+      <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <p class="text-slate-600 text-lg font-bold">No listings found</p>
+      <p class="text-slate-400 text-sm mt-1">Try different filters or check the site warnings above.</p>
+    </div>
+
+    <!-- Welcome state -->
+    <div id="welcome-state" class="text-center py-20">
+      <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5"
+           style="background: linear-gradient(135deg, #dbeafe, #ede9fe);">
+        <svg class="w-9 h-9" fill="none" stroke="#3b82f6" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+      <p class="text-slate-700 text-xl font-bold">Ready to find a place?</p>
+      <p class="text-slate-400 text-sm mt-2 max-w-sm mx-auto leading-relaxed">
+        Paste a Google Maps link — try APU University, Bukit Jalil — pick your room type and hit Search.
+      </p>
+    </div>
+
+  </div>
+
+  <!-- ── Preview Modal ────────────────────────────────────────────────────── -->
+  <div id="preview-modal" onclick="if(event.target===this)closeModal()">
+    <div id="preview-inner">
+      <div style="position:relative;">
+        <img id="preview-img" src="" alt="" onerror="this.style.display='none'" />
+        <button onclick="closeModal()"
+          style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.5);color:#fff;
+                 border:none;border-radius:999px;width:32px;height:32px;cursor:pointer;
+                 font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;">
+          ×
+        </button>
+        <span id="preview-badge"
+          style="position:absolute;bottom:12px;left:12px;color:#fff;font-size:12px;font-weight:700;
+                 padding:3px 10px;border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></span>
+      </div>
+      <div style="padding:22px 24px;">
+        <h2 id="preview-title" style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:6px;line-height:1.3;"></h2>
+        <p id="preview-price" style="font-size:28px;font-weight:900;letter-spacing:-1px;margin-bottom:12px;"></p>
+
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+          <div class="detail-row">
+            <svg width="15" height="15" fill="none" stroke="#64748b" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span id="preview-location" style="font-size:14px;color:#475569;"></span>
+          </div>
+          <div class="detail-row" id="preview-dist-row" style="display:none;">
+            <svg width="15" height="15" fill="none" stroke="#2563eb" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+            </svg>
+            <span id="preview-dist" style="font-size:14px;color:#2563eb;font-weight:600;"></span>
+          </div>
+          <div class="detail-row">
+            <svg width="15" height="15" fill="none" stroke="#64748b" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+            </svg>
+            <span id="preview-beds" style="font-size:14px;color:#475569;"></span>
+          </div>
+        </div>
+
+        <a id="preview-link" href="#" target="_blank" rel="noopener"
+           style="display:block;text-align:center;padding:14px;border-radius:14px;
+                  color:#fff;font-size:15px;font-weight:700;text-decoration:none;
+                  transition:opacity 0.15s;"
+           onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+          View full listing →
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .detail-row { display:flex; align-items:flex-start; gap:8px; }
+  </style>
+
+  <script>
+  // ─── State ──────────────────────────────────────────────────────────────────
+  let allListings = [];
+  let leafletMap  = null;
+  let mapMarkers  = [];
+  let targetPin   = null;
+  let isFullscreen = false;
+
+  // ─── DOM ────────────────────────────────────────────────────────────────────
+  const form        = document.getElementById('search-form');
+  const btn         = document.getElementById('search-btn');
+  const statusTxt   = document.getElementById('status-text');
+  const toolbar     = document.getElementById('toolbar');
+  const skelGrid    = document.getElementById('skeleton-grid');
+  const resultsGrid = document.getElementById('results-grid');
+  const emptyState  = document.getElementById('empty-state');
+  const welcomeState= document.getElementById('welcome-state');
+  const countEl     = document.getElementById('result-count');
+  const errorBadges = document.getElementById('error-badges');
+  const sortSelect  = document.getElementById('sort-select');
+  const mapSection  = document.getElementById('map-section');
+  const mapEl       = document.getElementById('map');
+
+  const SOURCE = {
+    PropertyGuru: '#16a34a',
+    DotProperty:  '#2563eb',
+    Rentola:      '#dc2626',
+    iProperty:    '#ea580c',
+    EdgeProp:     '#0891b2',
+    Mudah:        '#d97706',
+    StarProperty: '#7c3aed',
+  };
+
+  // ─── Fullscreen toggle ───────────────────────────────────────────────────────
+  document.getElementById('fullscreen-btn').addEventListener('click', () => {
+    isFullscreen = !isFullscreen;
+    mapEl.classList.toggle('fullscreen', isFullscreen);
+    document.getElementById('fullscreen-btn').textContent = isFullscreen ? '⊠' : '⛶';
+    if (leafletMap) leafletMap.invalidateSize();
+  });
+
+  // ─── Map ────────────────────────────────────────────────────────────────────
+  function initMap(lat, lng, name) {
+    mapSection.classList.remove('hidden');
+    document.getElementById('map-title').textContent   = 'Search area';
+    document.getElementById('map-subtitle').textContent = name ? '· ' + name : '';
+
+    if (!leafletMap) {
+      leafletMap = L.map('map').setView([lat, lng], 14);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd', maxZoom: 19,
+      }).addTo(leafletMap);
+    } else {
+      leafletMap.setView([lat, lng], 14);
+      mapMarkers.forEach(m => m.remove());
+      mapMarkers = [];
+      if (targetPin) targetPin.remove();
+    }
+
+    const targetIcon = L.divIcon({
+      className: '',
+      html: `<div style="width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+        background:#1d4ed8;border:3px solid #fff;box-shadow:0 2px 8px rgba(29,78,216,0.5);"></div>`,
+      iconSize: [28,28], iconAnchor: [14,28],
+    });
+    targetPin = L.marker([lat, lng], { icon: targetIcon })
+      .addTo(leafletMap)
+      .bindPopup(`<div class="map-popup"><strong>📍 Your location</strong><span class="mloc">${escHtml(name||'Target')}</span></div>`)
+      .openPopup();
+  }
+
+  function addListingPins(listings) {
+    listings.filter(l => l.lat && l.lng).forEach(l => {
+      const color = SOURCE[l.source] || '#64748b';
+      const icon  = L.divIcon({
+        className: '',
+        html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};
+          border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [18,18], iconAnchor: [9,9],
+      });
+      const dist = l.distance_km != null ? `<span class="mloc">${l.distance_km} km away</span>` : '';
+      const m = L.marker([l.lat, l.lng], { icon })
+        .addTo(leafletMap)
+        .bindPopup(`<div class="map-popup">
+          <strong>${escHtml(l.title.slice(0,55))}</strong>
+          <span class="mprice">${escHtml(l.price)}</span>
+          ${dist}
+          <a href="${escHtml(l.listing_url)}" target="_blank" rel="noopener">View on ${escHtml(l.source)} →</a>
+        </div>`);
+      mapMarkers.push(m);
+    });
+
+    // Fit map to show all markers if we have enough
+    const allPoints = listings.filter(l => l.lat && l.lng).map(l => [l.lat, l.lng]);
+    if (allPoints.length > 0 && targetPin) {
+      const group = L.featureGroup([targetPin, ...mapMarkers]);
+      leafletMap.fitBounds(group.getBounds().pad(0.2));
+    }
+  }
+
+  // ─── Skeleton ───────────────────────────────────────────────────────────────
+  function showSkeleton() {
+    skelGrid.innerHTML = Array(6).fill(`
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="skeleton" style="height:200px;border-radius:0;"></div>
+        <div class="p-4 space-y-2.5">
+          <div class="skeleton" style="height:14px;width:75%;"></div>
+          <div class="skeleton" style="height:12px;width:50%;"></div>
+          <div class="skeleton" style="height:24px;width:40%;margin-top:10px;"></div>
+          <div class="skeleton" style="height:38px;width:100%;margin-top:8px;border-radius:10px;"></div>
+        </div>
+      </div>`).join('');
+    skelGrid.classList.remove('hidden');
+  }
+  function hideSkeleton() { skelGrid.classList.add('hidden'); }
+
+  // ─── Preview modal ───────────────────────────────────────────────────────────
+  function openModal(listing) {
+    const color = SOURCE[listing.source] || '#64748b';
+    const modal = document.getElementById('preview-modal');
+    const img   = document.getElementById('preview-img');
+
+    img.src = listing.image_url || '';
+    img.style.display = listing.image_url ? 'block' : 'none';
+    document.getElementById('preview-badge').textContent  = listing.source;
+    document.getElementById('preview-badge').style.background = color;
+    document.getElementById('preview-title').textContent  = listing.title;
+    document.getElementById('preview-price').textContent  = listing.price;
+    document.getElementById('preview-price').style.color  = color;
+    document.getElementById('preview-location').textContent = listing.location;
+    document.getElementById('preview-beds').textContent   = `${listing.bedrooms} bedroom apartment`;
+
+    const distRow = document.getElementById('preview-dist-row');
+    if (listing.distance_km != null) {
+      document.getElementById('preview-dist').textContent = `${listing.distance_km} km from your target`;
+      distRow.style.display = 'flex';
+    } else {
+      distRow.style.display = 'none';
+    }
+
+    const link = document.getElementById('preview-link');
+    link.href = listing.listing_url;
+    link.style.background = color;
+    link.textContent = `View on ${listing.source} →`;
+
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    document.getElementById('preview-modal').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  // ─── Card builder ────────────────────────────────────────────────────────────
+  function buildCard(l, idx) {
+    const color = SOURCE[l.source] || '#64748b';
+    const dist  = l.distance_km != null
+      ? `<div style="color:#2563eb;font-size:12px;font-weight:600;display:flex;align-items:center;gap:4px;margin-top:4px;">
+           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round"
+               d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+             <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+           </svg>
+           ${l.distance_km} km from target
+         </div>`
+      : '';
+    const imgHtml = l.image_url
+      ? `<img class="card-img" src="${escHtml(l.image_url)}" alt="${escHtml(l.title)}" loading="lazy"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+         <div class="card-img" style="display:none;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;font-size:12px;">No image</div>`
+      : `<div class="card-img" style="display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;font-size:12px;">No image</div>`;
+
+    return `
+      <div class="listing-card bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col"
+           onclick="openModal(allListings[${idx}])">
+        <div class="img-wrap">
+          ${imgHtml}
+          <span class="source-badge" style="background:${color};">${escHtml(l.source)}</span>
+        </div>
+        <div class="p-4 flex flex-col flex-1">
+          <h3 style="font-size:14px;font-weight:600;color:#0f172a;line-height:1.4;
+                     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+                     overflow:hidden;margin-bottom:4px;">
+            ${escHtml(l.title)}
+          </h3>
+          <p style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px;
+                    overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            </svg>
+            ${escHtml(l.location)}
+          </p>
+          ${dist}
+          <div style="padding-top:12px;border-top:1px solid #f1f5f9;margin-top:12px;">
+            <p style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;">${escHtml(l.price)}</p>
+          </div>
+          <a href="${escHtml(l.listing_url)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()"
+             style="display:block;margin-top:10px;text-align:center;padding:10px;border-radius:12px;
+                    background:${color};color:#fff;font-size:13px;font-weight:700;text-decoration:none;
+                    transition:opacity 0.15s;"
+             onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+            View on ${escHtml(l.source)} →
+          </a>
+        </div>
+      </div>`;
+  }
+
+  function escHtml(s) {
+    return String(s||'')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+  function renderListings(listings) {
+    resultsGrid.innerHTML = '';
+    welcomeState.classList.add('hidden');
+    if (!listings.length) {
+      emptyState.classList.remove('hidden');
+      toolbar.classList.add('hidden');
+      return;
+    }
+    emptyState.classList.add('hidden');
+    toolbar.classList.remove('hidden');
+    countEl.textContent = `${listings.length} listing${listings.length !== 1 ? 's' : ''} found`;
+    resultsGrid.innerHTML = listings.map((l, i) => buildCard(l, i)).join('');
+  }
+
+  function sortedListings() {
+    const mode = sortSelect.value;
+    // We need to preserve original indices for onclick, so sort a copy with original index
+    const indexed = allListings.map((l, i) => ({ ...l, _idx: i }));
+    if (mode === 'distance') {
+      const w  = indexed.filter(l => l.distance_km != null).sort((a,b) => a.distance_km - b.distance_km);
+      const wo = indexed.filter(l => l.distance_km == null).sort((a,b) => a.price_numeric - b.price_numeric);
+      return [...w, ...wo];
+    }
+    return indexed.sort((a,b) => mode === 'price_asc'
+      ? a.price_numeric - b.price_numeric
+      : b.price_numeric - a.price_numeric);
+  }
+
+  // Re-render on sort (build cards using _idx for the modal)
+  function renderSorted() {
+    const sorted = sortedListings();
+    resultsGrid.innerHTML = '';
+    if (!sorted.length) { emptyState.classList.remove('hidden'); toolbar.classList.add('hidden'); return; }
+    emptyState.classList.add('hidden');
+    toolbar.classList.remove('hidden');
+    countEl.textContent = `${sorted.length} listing${sorted.length !== 1 ? 's' : ''} found`;
+    resultsGrid.innerHTML = sorted.map(l => buildCard(l, l._idx)).join('');
+  }
+  sortSelect.addEventListener('change', renderSorted);
+
+  // ─── Errors ──────────────────────────────────────────────────────────────────
+  function showErrors(errors) {
+    errorBadges.innerHTML = '';
+    for (const [site, msg] of Object.entries(errors)) {
+      errorBadges.insertAdjacentHTML('beforeend',
+        `<span title="${escHtml(msg)}"
+           style="font-size:11px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;
+                  padding:2px 8px;border-radius:999px;cursor:help;font-weight:600;">
+           ⚠ ${escHtml(site)}
+         </span>`);
+    }
+  }
+
+  // ─── Search ──────────────────────────────────────────────────────────────────
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const mapsUrl  = document.getElementById('maps-url').value.trim();
+    const bedrooms = parseInt(document.getElementById('bedrooms').value, 10);
+    const sites    = [...document.querySelectorAll('.site-toggle:checked')].map(el => el.value);
+    if (!sites.length) { alert('Select at least one site.'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Searching…';
+    statusTxt.textContent = 'Scraping sites — may take 30–60 s…';
+    statusTxt.classList.remove('hidden');
+    resultsGrid.innerHTML = '';
+    emptyState.classList.add('hidden');
+    toolbar.classList.add('hidden');
+    showSkeleton();
+
+    try {
+      const res  = await fetch('/search', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ maps_url: mapsUrl, bedrooms, sites }),
+      });
+      const data = await res.json();
+      allListings = data.listings || [];
+      showErrors(data.errors || {});
+      hideSkeleton();
+      renderSorted();
+
+      const t = data.target || {};
+      if (t.lat && t.lng) {
+        initMap(t.lat, t.lng, t.name);
+        addListingPins(allListings);
+        setTimeout(() => leafletMap.invalidateSize(), 150);
+      }
+
+      statusTxt.textContent = t.lat
+        ? `${data.count} rentals near ${t.name}`
+        : `${data.count} listings found`;
+
+    } catch (err) {
+      hideSkeleton();
+      statusTxt.textContent = `Error: ${err.message}`;
+      emptyState.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Search';
+    }
+  });
+  </script>
+</body>
+</html>
